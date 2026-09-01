@@ -8,7 +8,7 @@ Right-click a file on your Mac. Send it to your Android phone. That's it.
 
 ## The problem
 
-AirDrop only talks to Apple devices. Google's new AirDrop interop only ships on an allowlist of phones (Pixel, Samsung, a few others). If your phone is not on the list, you are back to cables and cloud uploads.
+AirDrop does not work with most Android phones. A few new ones (recent Pixels and Samsungs) got it, everyone else is stuck emailing themselves files or plugging in a cable.
 
 ## The solution
 
@@ -16,7 +16,7 @@ Drawbridge puts AirDrop's convenience on any Android phone:
 
 - **Send:** select files in Finder, right-click, Send to Phone. Done.
 - **Receive:** files from the phone land in `~/Drawbridge` with a notification. A background service is always listening, even after reboots.
-- **Nothing to install on the Mac.** Pure Python standard library, using the Python macOS already ships. The phone runs the free [LocalSend](https://localsend.org) app.
+- **Nothing to install on the Mac.** No dependencies, no package managers. It runs on the Python that comes with macOS. The phone runs the free [LocalSend](https://localsend.org) app.
 - **No cloud.** Everything moves over your Wi-Fi, or the phone's own hotspot with zero internet.
 
 <p align="center">
@@ -25,7 +25,7 @@ Drawbridge puts AirDrop's convenience on any Android phone:
 
 ## How it works
 
-Drawbridge is a small implementation of the open LocalSend v2 protocol, wired into macOS: a Finder Quick Action for sending and a login service for receiving. Multi-file selections go as one batch with a single prompt on the phone. Transfers are streamed in chunks, written to a temp file, and renamed only when complete, so an interrupted transfer never leaves a half-written fake. It speaks both plain HTTP and LocalSend's mutual TLS encryption.
+Drawbridge speaks the same open protocol as the LocalSend app, and wires it into macOS: a right-click menu item for sending and a background service for receiving. Selecting multiple files sends them as one batch with a single prompt on the phone. Files are written to a temp file and renamed only when complete, so a dropped connection never leaves you a half-written fake. Transfers can be encrypted end to end.
 
 ## Setup
 
