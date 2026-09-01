@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="840" height="220" viewBox="0 0 840 220" role="img" aria-label="Drawbridge">
+  <!-- flat card -->
+  <rect x="0" y="0" width="840" height="220" rx="22" fill="#5C1524"/>
+
+  <!-- icon tile -->
+  <rect x="56" y="48" width="124" height="124" rx="28" fill="#47101C"/>
+
+  <!-- glyph: an opening drawbridge -->
+  <g stroke="#E3B75B" stroke-width="10" stroke-linecap="round" fill="none">
+    <!-- piers -->
+    <line x1="88"  y1="150" x2="88"  y2="126"/>
+    <line x1="148" y1="150" x2="148" y2="126"/>
+    <!-- raised deck halves -->
+    <line x1="88"  y1="126" x2="112" y2="96"/>
+    <line x1="148" y1="126" x2="124" y2="96"/>
+  </g>
+  <!-- file crossing the gap -->
+  <circle cx="118" cy="80" r="6.5" fill="#F5EFE6"/>
+
+  <!-- wordmark -->
+  <text x="216" y="120" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif"
+        font-size="54" font-weight="700" fill="#F5EFE6" letter-spacing="0.5">Drawbridge</text>
+  <text x="219" y="154" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif"
+        font-size="17" fill="#DFB566">AirDrop-style file sharing between macOS and Android</text>
+</svg>

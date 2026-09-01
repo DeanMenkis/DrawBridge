@@ -1,0 +1,14 @@
+# generated TLS identity, never commit
+cert.pem
+key.pem
+
+# real config (only config.example.json ships)
+drawbridge/config.json
+
+# python
+__pycache__/
+*.pyc
+.ruff_cache/
+
+# macOS
+.DS_Store

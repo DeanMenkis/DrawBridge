@@ -1,0 +1,7 @@
+{
+  "_readme": "Drawbridge config. The phone runs the LocalSend app; the Mac runs the tools in this folder. See README.md for every field. JSON has no comments.",
+  "phone": { "host": "", "port": 53317, "protocol": "auto" },
+  "mac":   { "alias": "MacBook", "port": 53317, "protocol": "http", "fingerprint": "drawbridge-mac" },
+  "save_dir": "~/Drawbridge",
+  "transfer": { "chunk_size_bytes": 1048576, "timeout_seconds": 600, "retries": 3, "retry_backoff_seconds": 5, "verify_sha256": false }
+}
