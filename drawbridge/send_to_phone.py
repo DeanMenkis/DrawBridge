@@ -17,9 +17,12 @@ phone.host in config.json, or use --discover to find it automatically.
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
+import http.client
 import json
 import logging
 import socket
+import ssl
 import struct
 import subprocess
 import sys
@@ -41,10 +44,87 @@ def load_config(path: str) -> dict:
         return {}
 
 
-def discover_phone(mac_fingerprint: str, timeout: float = 4.0) -> str | None:
-    """Listen briefly for a LocalSend multicast announce from a *mobile*
-    device and return its IP, so you don't have to type the phone's address.
-    Best-effort: returns None if nothing announces in time."""
+def local_ipv4() -> str | None:
+    """This Mac's address on the local network, taken from the routing
+    table rather than the hostname, which on macOS often resolves to
+    something useless."""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        sock.connect(("192.0.2.1", 9))  # reserved test address, sends nothing
+        return sock.getsockname()[0]
+    except OSError:
+        return None
+    finally:
+        sock.close()
+
+
+def announce_self(mac_fingerprint: str) -> None:
+    """Shout our own announce onto the multicast group. A LocalSend app
+    that hears one answers with its own, which turns a passive wait (only
+    works if the phone happens to be talking) into an actual question."""
+    payload = json.dumps(
+        {
+            **localsend.make_info(
+                "MacBook",
+                localsend.MULTICAST_PORT,
+                device_model="Mac",
+                device_type="desktop",
+                fingerprint=mac_fingerprint,
+            ),
+            "announce": True,
+        }
+    ).encode("utf-8")
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 2)
+        sock.sendto(payload, (localsend.MULTICAST_GROUP, localsend.MULTICAST_PORT))
+    except OSError as exc:
+        LOG.debug("announce probe failed: %s", exc)
+    finally:
+        sock.close()
+
+
+def peer_info(host: str, port: int, timeout: float = 2.0) -> dict | None:
+    """Ask a host what it is. Returns its LocalSend info object, or None if
+    it is not a LocalSend device. Tries GET /info, then register, because
+    not every implementation serves both."""
+    probes = (
+        ("GET", f"{localsend.API_PREFIX}/info", None),
+        ("POST", f"{localsend.API_PREFIX}/register", {"alias": "Drawbridge probe"}),
+    )
+    for protocol in ("http", "https"):
+        for method, path, payload in probes:
+            try:
+                if protocol == "https":
+                    ctx = ssl.create_default_context()
+                    ctx.check_hostname = False
+                    ctx.verify_mode = ssl.CERT_NONE
+                    conn = http.client.HTTPSConnection(
+                        host, port, timeout=timeout, context=ctx
+                    )
+                else:
+                    conn = http.client.HTTPConnection(host, port, timeout=timeout)
+                try:
+                    body = json.dumps(payload).encode("utf-8") if payload else None
+                    headers = {"Content-Type": "application/json"} if body else {}
+                    conn.request(method, path, body=body, headers=headers)
+                    resp = conn.getresponse()
+                    raw = resp.read()
+                    if resp.status == 200:
+                        info = json.loads(raw.decode("utf-8"))
+                        if isinstance(info, dict) and info.get("alias"):
+                            return info
+                finally:
+                    conn.close()
+            except (OSError, ValueError, http.client.HTTPException):
+                continue
+    return None
+
+
+def discover_by_multicast(mac_fingerprint: str, timeout: float = 4.0) -> str | None:
+    """Announce ourselves, then listen for a LocalSend announce from a
+    *mobile* device and return its IP. Best-effort: returns None if nothing
+    answers in time, which is common on networks that filter multicast."""
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     if hasattr(socket, "SO_REUSEPORT"):
@@ -59,17 +139,22 @@ def discover_phone(mac_fingerprint: str, timeout: float = 4.0) -> str | None:
         )
         sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
     except OSError as exc:
-        LOG.warning("discovery unavailable (%s); use --host instead", exc)
+        LOG.debug("multicast discovery unavailable (%s)", exc)
         sock.close()
         return None
 
+    announce_self(mac_fingerprint)
     deadline = time.time() + timeout
     sock.settimeout(1.0)
     try:
         while time.time() < deadline:
             try:
                 data, addr = sock.recvfrom(65536)
-            except TimeoutError:
+            except socket.timeout:
+                # One quiet second, not the end of the wait. socket.timeout
+                # is its own class on the Python macOS ships, so catching
+                # TimeoutError here would fall through to OSError and cut
+                # the search short.
                 continue
             except OSError:
                 break
@@ -80,13 +165,62 @@ def discover_phone(mac_fingerprint: str, timeout: float = 4.0) -> str | None:
             if peer.get("fingerprint") == mac_fingerprint:
                 continue  # our own announce
             if peer.get("deviceType") in ("mobile", "web") or peer.get("alias"):
-                LOG.info(
-                    "discovered '%s' at %s", peer.get("alias", "?"), addr[0]
-                )
+                LOG.info("discovered '%s' at %s", peer.get("alias", "?"), addr[0])
                 return addr[0]
     finally:
         sock.close()
     return None
+
+
+def scan_subnet(mac_fingerprint: str, connect_timeout: float = 1.0) -> str | None:
+    """Walk our own /24 looking for the LocalSend port, then ask each hit
+    what it is. Slower than multicast, but it works on the many home
+    routers and guest networks that quietly drop multicast between
+    clients."""
+    mine = local_ipv4()
+    if not mine:
+        return None
+    prefix, _, _ = mine.rpartition(".")
+    port = localsend.MULTICAST_PORT
+
+    def listening(host: str) -> str | None:
+        sock = socket.socket()
+        sock.settimeout(connect_timeout)
+        try:
+            sock.connect((host, port))
+            return host
+        except OSError:
+            return None
+        finally:
+            sock.close()
+
+    hosts = [f"{prefix}.{n}" for n in range(1, 255) if f"{prefix}.{n}" != mine]
+    with concurrent.futures.ThreadPoolExecutor(max_workers=64) as pool:
+        candidates = [h for h in pool.map(listening, hosts) if h]
+
+    fallback = None
+    for host in candidates:
+        info = peer_info(host, port)
+        if not info or info.get("fingerprint") == mac_fingerprint:
+            continue
+        LOG.info(
+            "found '%s' at %s by scanning the network", info.get("alias", "?"), host
+        )
+        if info.get("deviceType") == "mobile":
+            return host
+        fallback = fallback or host
+    return fallback
+
+
+def discover_phone(mac_fingerprint: str, timeout: float = 4.0) -> str | None:
+    """Find the phone's IP so nobody has to type it. Multicast first
+    because it is instant when the network allows it, then a scan of the
+    local network, which is what actually works the rest of the time."""
+    host = discover_by_multicast(mac_fingerprint, timeout=timeout)
+    if host:
+        return host
+    LOG.info("no answer over multicast; scanning the local network ...")
+    return scan_subnet(mac_fingerprint)
 
 
 def default_gateway() -> str | None:

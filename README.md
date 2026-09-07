@@ -50,9 +50,9 @@ Mac, once:
 
 | Symptom | Fix |
 |---|---|
-| Send does nothing | Read `/tmp/drawbridge-send.log`. Usually LocalSend is closed on the phone or the devices are on different networks |
-| Nothing arrives on the Mac | `launchctl list \| grep drawbridge` should show 0. Log: `/tmp/drawbridge-receiver.log` |
-| Phone never found | Put the phone's IP in `phone.host` in `~/Library/Application Support/drawbridge/config.json` |
+| Send does nothing | Read `~/Library/Logs/Drawbridge/send.log`. Usually LocalSend is closed on the phone, or it is open but Android has put it to sleep |
+| Nothing arrives on the Mac | `launchctl list \| grep drawbridge` should show 0. Log: `~/Library/Logs/Drawbridge/receiver.log` |
+| Phone never found | Open LocalSend on the phone and leave it on screen, then send again. Drawbridge asks over multicast and then scans the network, but the phone only answers while its LocalSend server is actually running. If your network blocks both, put the phone's IP in `phone.host` in `~/Library/Application Support/drawbridge/config.json` |
 
 ## Security
 

@@ -14,6 +14,7 @@ The large-file size is configurable:
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import os
 import shutil
@@ -22,13 +23,16 @@ import sys
 import tempfile
 import threading
 import time
+import types
 import typing
 import unittest
+import unittest.mock
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "drawbridge"))
 
 import localsend
+import send_to_phone
 
 logging.getLogger("drawbridge").addHandler(logging.NullHandler())
 
@@ -374,6 +378,97 @@ class BatchTests(LoopbackCase):
         self.assertTrue(results[good])
         self.assertFalse(results[bad])
         self.assertTrue((self.target_dir / "good.jpg").exists())
+
+
+class DiscoveryTests(unittest.TestCase):
+    """Finding the phone. This is the half that broke in the field: the
+    multicast listen quit after one quiet second, and nothing picked up
+    the slack, so every send fell through to the router and failed."""
+
+    def setUp(self):
+        self.target_dir = Path(tempfile.mkdtemp(prefix="drawbridge-discovery-"))
+        self.addCleanup(shutil.rmtree, self.target_dir, True)
+        self.server = start_loopback_server(self.target_dir)
+        self.addCleanup(self.server.stop)
+
+    def test_peer_info_identifies_a_running_localsend_host(self):
+        info = send_to_phone.peer_info("127.0.0.1", self.server.actual_port)
+        self.assertIsNotNone(info)
+        self.assertEqual(info["alias"], "Test Mac")
+        self.assertEqual(info["fingerprint"], "test-mac")
+
+    def test_peer_info_falls_back_to_register_without_a_get_route(self):
+        """Older builds serve only the POST routes. Identifying those is
+        what lets a scan find a peer that predates GET /info."""
+        handler = self.server._httpd.RequestHandlerClass
+        original = handler.do_GET
+        handler.do_GET = lambda self: self._send_json(404, {"error": "not found"})
+        self.addCleanup(setattr, handler, "do_GET", original)
+
+        info = send_to_phone.peer_info("127.0.0.1", self.server.actual_port)
+        self.assertIsNotNone(info)
+        self.assertEqual(info["alias"], "Test Mac")
+
+    def test_peer_info_ignores_something_that_is_not_localsend(self):
+        junk = socket.socket()
+        junk.bind(("127.0.0.1", 0))
+        junk.listen(1)
+        self.addCleanup(junk.close)
+        port = junk.getsockname()[1]
+        self.assertIsNone(send_to_phone.peer_info("127.0.0.1", port, timeout=1.0))
+
+    def test_multicast_listen_survives_quiet_seconds(self):
+        """A second with no traffic is not the end of the search. On the
+        Python macOS ships, socket.timeout is its own class, so catching
+        TimeoutError here dropped straight through to OSError and cut the
+        listen short. The phone announces every few seconds, so giving up
+        after the first silent read meant never finding it.
+
+        Driven off a fake socket rather than the network, so the result
+        does not depend on what else happens to be on the LAN."""
+        announce = json.dumps(
+            {"alias": "blubub", "deviceType": "mobile", "fingerprint": "phone-fp"}
+        ).encode("utf-8")
+
+        class QuietThenTalkingSocket:
+            """Two silent reads, then the announce, the way a real phone
+            that is not mid-broadcast looks."""
+
+            def __init__(self):
+                self.reads = 0
+
+            def setsockopt(self, *args):
+                pass
+
+            def bind(self, addr):
+                pass
+
+            def settimeout(self, value):
+                pass
+
+            def close(self):
+                pass
+
+            def recvfrom(self, size):
+                self.reads += 1
+                if self.reads <= 2:
+                    raise socket.timeout("timed out")
+                return announce, ("192.168.1.64", 53317)
+
+        fake = QuietThenTalkingSocket()
+        shim = types.SimpleNamespace(
+            **{name: getattr(socket, name) for name in dir(socket) if not name.startswith("_")}
+        )
+        shim.socket = lambda *args, **kwargs: fake
+
+        with unittest.mock.patch.object(send_to_phone, "socket", shim), \
+             unittest.mock.patch.object(send_to_phone, "announce_self", lambda fp: None):
+            result = send_to_phone.discover_by_multicast("test-mac", timeout=30.0)
+
+        self.assertEqual(result, "192.168.1.64")
+        self.assertEqual(
+            fake.reads, 3, "discovery stopped reading before the phone spoke up"
+        )
 
 
 if __name__ == "__main__":

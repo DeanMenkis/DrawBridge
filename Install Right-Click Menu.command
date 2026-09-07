@@ -58,7 +58,8 @@ import os, plistlib, sys, uuid
 
 send = os.environ["SEND_SCRIPT"]
 command = (
-    '/usr/bin/python3 "%s" --discover "$@" > /tmp/drawbridge-send.log 2>&1\n'
+    'LOG="$HOME/Library/Logs/Drawbridge"; mkdir -p "$LOG"\n'
+    '/usr/bin/python3 "%s" --discover "$@" > "$LOG/send.log" 2>&1\n'
     'if [ $? -eq 0 ]; then\n'
     "  osascript -e 'display notification \"Sent to your phone\" with title \"Drawbridge\"'\n"
     'else\n'

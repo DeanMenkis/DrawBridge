@@ -13,6 +13,8 @@ LocalSend clients send):
 
 * Discovery: UDP multicast announce/listen on ``224.0.0.167:53317``. The
   announce payload is the device "info" object plus ``"announce": true``.
+* ``GET /api/localsend/v2/info`` - response is this device's info object.
+  How a client checks what a host is without offering it anything.
 * ``POST /api/localsend/v2/register`` - body is the sender's info object,
   response is the receiver's info object.
 * ``POST /api/localsend/v2/prepare-upload`` - body is
@@ -328,6 +330,17 @@ def _make_handler(server_obj: LocalSendServer):
             return json.loads(raw.decode("utf-8")) if raw else {}
 
         # -- routing -----------------------------------------------------
+        def do_GET(self):
+            # LocalSend clients probe this to see what a host is before
+            # sending to it, and it is what an "add device by IP" entry in
+            # the app talks to. Cheap to answer and it makes this Mac
+            # visible to anything scanning the network.
+            parsed = urlsplit(self.path)
+            if parsed.path in (f"{API_PREFIX}/info", "/api/localsend/v1/info"):
+                self._send_json(200, server_obj.info)
+            else:
+                self._send_json(404, {"error": "not found"})
+
         def do_POST(self):
             parsed = urlsplit(self.path)
             if parsed.path == f"{API_PREFIX}/register":

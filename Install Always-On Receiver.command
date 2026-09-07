@@ -5,6 +5,12 @@
 set -euo pipefail
 DIR="$(cd "$(dirname "$0")" && pwd)"
 AGENTS="$HOME/Library/LaunchAgents"
+# Logs live under ~/Library/Logs, not /tmp: macOS reaps /tmp files that
+# have not been touched for a few days, and a log that deletes itself is
+# worse than no log when someone finally asks why a send failed.
+LOGDIR="$HOME/Library/Logs/Drawbridge"
+mkdir -p "$LOGDIR"
+
 PLIST="$AGENTS/com.drawbridge.receiver.plist"
 
 # macOS blocks background services from reading ~/Documents (privacy), so the
@@ -37,9 +43,9 @@ cat > "$PLIST" <<PLISTEOF
     <key>KeepAlive</key>
     <true/>
     <key>StandardOutPath</key>
-    <string>/tmp/drawbridge-receiver.log</string>
+    <string>${LOGDIR}/receiver.log</string>
     <key>StandardErrorPath</key>
-    <string>/tmp/drawbridge-receiver.log</string>
+    <string>${LOGDIR}/receiver.log</string>
 </dict>
 </plist>
 PLISTEOF
@@ -52,7 +58,7 @@ launchctl load "$PLIST"
 echo "Installed. This Mac now receives from the phone in the background,"
 echo "even after a reboot. Files save to ~/Drawbridge."
 echo "It appears to the phone as 'MacBook' in LocalSend."
-echo "Log file: /tmp/drawbridge-receiver.log"
+echo "Log file: $LOGDIR/receiver.log"
 echo "To turn it off, double-click 'Uninstall Always-On Receiver.command'."
 osascript -e 'display notification "Always-on receiver is running" with title "Drawbridge"' >/dev/null 2>&1 || true
 

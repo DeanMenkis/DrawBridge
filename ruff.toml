@@ -1,0 +1,5 @@
+# Drawbridge runs on the Python that ships with macOS, currently 3.9.
+# Pinning the target keeps ruff from "modernising" code into syntax and
+# exception aliases that do not exist there. socket.timeout vs TimeoutError
+# is the one that already cost us a broken discovery path.
+target-version = "py39"
